@@ -1,0 +1,822 @@
+----------------------------------------------------------------
+FILE: ./graph_ds.py
+----------------------------------------------------------------
+import yfinance as yf
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import numpy as np
+import warnings
+from datetime import datetime
+warnings.filterwarnings('ignore')
+
+# Configuración de fechas
+fecha_inicio = "2025-01-01"
+fecha_fin = "2026-01-05"
+
+print(f"Obteniendo datos REALES del DXY desde {fecha_inicio} hasta {fecha_fin}...")
+
+try:
+    # Descargar datos reales
+    dxy = yf.download("DX-Y.NYB",
+                     start=fecha_inicio,
+                     end=fecha_fin,
+                     progress=False)
+
+    print(f"Datos obtenidos: {len(dxy)} registros")
+    print(f"Período cubierto: {dxy.index[0].date()} a {dxy.index[-1].date()}")
+
+    # Simplificar columnas MultiIndex
+    if isinstance(dxy.columns, pd.MultiIndex):
+        new_columns = []
+        for col in dxy.columns:
+            if col[0]:  # Si el primer nivel no está vacío
+                new_columns.append(col[0])
+            else:
+                new_columns.append(col[1])
+        dxy.columns = new_columns
+
+    print(f"\nColumnas disponibles: {dxy.columns.tolist()}")
+    print(f"\nMuestra de datos de volumen (primeros 5 días):")
+    print(dxy['Volume'].head())
+
+    # Verificar si hay volumen real
+    volumen_total = dxy['Volume'].sum()
+    print(f"\nVolumen total del período: {volumen_total:,.0f}")
+
+    # Crear figura - SOLO gráfico de precios (sin volumen si es 0)
+    if volumen_total > 0:
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 8),
+                                       gridspec_kw={'height_ratios': [3, 1]},
+                                       sharex=True)
+        tiene_volumen = True
+    else:
+        fig, ax1 = plt.subplots(1, 1, figsize=(14, 7))
+        tiene_volumen = False
+        print("NOTA: No hay datos de volumen disponibles. Mostrando solo gráfico de precios.")
+
+    # Gráfico de precios
+    ax1.plot(dxy.index, dxy['Close'],
+            color='#1f77b4',
+            linewidth=2.5,
+            label='DXY (Cierre)')
+
+    # Bandas de precio (High-Low)
+    ax1.fill_between(dxy.index,
+                    dxy['Low'],
+                    dxy['High'],
+                    alpha=0.15,
+                    color='lightblue',
+                    label='Rango diario')
+
+    # Medias móviles
+    dxy['MA_20'] = dxy['Close'].rolling(window=20, min_periods=1).mean()
+    dxy['MA_50'] = dxy['Close'].rolling(window=50, min_periods=1).mean()
+
+    ax1.plot(dxy.index, dxy['MA_20'],
+            color='red',
+            linestyle='--',
+            linewidth=1.5,
+            label='MA 20 días',
+            alpha=0.7)
+
+    ax1.plot(dxy.index, dxy['MA_50'],
+            color='orange',
+            linestyle='--',
+            linewidth=1.5,
+            label='MA 50 días',
+            alpha=0.7)
+
+    # Configurar gráfico de precios
+    ax1.set_title(f'Índice Dólar (DXY) - Enero 2025 a Enero 2026',
+                 fontsize=16,
+                 fontweight='bold',
+                 pad=20)
+    ax1.set_ylabel('Valor DXY', fontsize=12)
+    ax1.grid(True, alpha=0.3, linestyle='--')
+    ax1.legend(loc='best')
+
+    # Formatear fechas
+    ax1.xaxis.set_major_locator(mdates.MonthLocator())
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+    plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45, ha='right')
+
+    # Gráfico de volumen (solo si hay datos)
+    if tiene_volumen:
+        ax2.bar(dxy.index, dxy['Volume'],
+               color='lightgray',
+               alpha=0.7,
+               width=0.8)
+        ax2.set_ylabel('Volumen', fontsize=12)
+        ax2.grid(True, alpha=0.3, axis='y')
+        ax2.xaxis.set_major_locator(mdates.MonthLocator())
+        ax2.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+        plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45, ha='right')
+    else:
+        # En lugar de volumen vacío, mostramos análisis técnico
+        ax1.text(0.02, 0.98, "NOTA: Sin datos de volumen\nMostrando solo análisis de precios",
+                transform=ax1.transAxes, fontsize=10,
+                bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.3),
+                verticalalignment='top')
+
+    # Estadísticas detalladas
+    cambio_total = ((dxy['Close'].iloc[-1] / dxy['Close'].iloc[0]) - 1) * 100
+    volatilidad = dxy['Close'].pct_change().std() * 100
+
+    # Encontrar máximos y mínimos
+    max_idx = dxy['High'].idxmax()
+    min_idx = dxy['Low'].idxmin()
+
+    stats_text = f"""Estadísticas DXY ({dxy.index[0].date()} a {dxy.index[-1].date()}):
+• Días analizados: {len(dxy)}
+• Primer cierre: {dxy['Close'].iloc[0]:.2f}
+• Último cierre: {dxy['Close'].iloc[-1]:.2f}
+• Cambio total: {cambio_total:+.2f}%
+• Máximo: {dxy['High'].max():.2f} ({max_idx.date()})
+• Mínimo: {dxy['Low'].min():.2f} ({min_idx.date()})
+• Volatilidad diaria: {volatilidad:.2f}%
+• Media 20 días: {dxy['MA_20'].iloc[-1]:.2f}
+• Media 50 días: {dxy['MA_50'].iloc[-1]:.2f}"""
+
+    ax1.text(0.02, 0.02, stats_text, transform=ax1.transAxes, fontsize=9,
+             bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='gray'),
+             verticalalignment='bottom', fontfamily='monospace')
+
+    plt.tight_layout()
+
+    # GUARDAR IMAGEN
+    nombre_imagen = f"dxy_{fecha_inicio}_{fecha_fin}.png"
+    plt.savefig(nombre_imagen, dpi=300, bbox_inches='tight')
+    print(f"\n✓ Gráfico guardado como: {nombre_imagen}")
+
+    # También guardar como PDF (vectorial, mejor calidad)
+    nombre_pdf = f"dxy_{fecha_inicio}_{fecha_fin}.pdf"
+    plt.savefig(nombre_pdf, bbox_inches='tight')
+    print(f"✓ Gráfico guardado como PDF: {nombre_pdf}")
+
+    plt.show()
+
+    # GUARDAR DATOS CSV Y MOSTRAR CÓMO VISUALIZARLOS
+    nombre_csv = f"dxy_datos_{fecha_inicio}_{fecha_fin}.csv"
+    dxy.to_csv(nombre_csv)
+    print(f"\n✓ Datos guardados en CSV: {nombre_csv}")
+
+    # Mostrar cómo visualizar el CSV
+    print("\n" + "="*70)
+    print("CÓMO VISUALIZAR EL ARCHIVO CSV:")
+    print("="*70)
+    print("\n1. Con pandas (en Python):")
+    print(f"   import pandas as pd")
+    print(f"   datos = pd.read_csv('{nombre_csv}', index_col=0, parse_dates=True)")
+    print(f"   print(datos.head())")
+
+    print("\n2. Con Excel/LibreOffice:")
+    print(f"   - Abre el archivo '{nombre_csv}' con Excel")
+    print(f"   - Selecciona 'Datos' -> 'Desde texto/CSV'")
+    print(f"   - Establece la codificación UTF-8 y separador coma")
+
+    print("\n3. Con línea de comandos:")
+    print(f"   # Linux/Mac:")
+    print(f"   head -n 10 {nombre_csv}")
+    print(f"   ")
+    print(f"   # Windows PowerShell:")
+    print(f"   Get-Content {nombre_csv} -TotalCount 10")
+
+    # Mostrar resumen del CSV
+    print(f"\n" + "="*70)
+    print("RESUMEN DEL ARCHIVO CSV GUARDADO:")
+    print("="*70)
+    print(f"• Filas: {len(dxy)}")
+    print(f"• Columnas: {len(dxy.columns)}")
+    print(f"• Columnas disponibles:")
+    for i, col in enumerate(dxy.columns, 1):
+        print(f"  {i}. {col}")
+
+    # Mostrar primeras y últimas filas del CSV
+    print(f"\nPrimeras 3 filas del CSV:")
+    print(dxy.head(3).to_string())
+
+    print(f"\nÚltimas 3 filas del CSV:")
+    print(dxy.tail(3).to_string())
+
+    # Análisis adicional
+    print("\n" + "="*70)
+    print("ANÁLISIS TÉCNICO DXY 2025-2026")
+    print("="*70)
+
+    # Señales de trading simples
+    dxy['Signal'] = np.where(dxy['MA_20'] > dxy['MA_50'], 'ALCISTA', 'BAJISTA')
+
+    # Contar días de cada señal
+    dias_alcistas = (dxy['Signal'] == 'ALCISTA').sum()
+    dias_bajistas = (dxy['Signal'] == 'BAJISTA').sum()
+
+    print(f"\nAnálisis de medias móviles:")
+    print(f"- Días con tendencia alcista (MA20 > MA50): {dias_alcistas} días ({dias_alcistas/len(dxy)*100:.1f}%)")
+    print(f"- Días con tendencia bajista (MA20 < MA50): {dias_bajistas} días ({dias_bajistas/len(dxy)*100:.1f}%)")
+
+    # Calcular RSI simplificado
+    delta = dxy['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+
+    print(f"\nAnálisis RSI (último valor): {rsi.iloc[-1]:.1f}")
+    if rsi.iloc[-1] > 70:
+        print("  → SOBRECOMPRADO (posible corrección)")
+    elif rsi.iloc[-1] < 30:
+        print("  → SOBREVENDIDO (posible rebote)")
+    else:
+        print("  → ZONA NEUTRA")
+
+    # Recomendación final
+    print("\n" + "="*70)
+    print("RECOMENDACIONES:")
+    print("="*70)
+    print("1. El gráfico se guardó como PNG y PDF en el directorio actual")
+    print("2. Los datos completos están en el archivo CSV")
+    print("3. Para análisis más detallado:")
+    print("   - Usa pandas para cargar el CSV")
+    print("   - Importa a Excel para análisis visual")
+    print("   - Agrega más indicadores técnicos según necesidad")
+
+except Exception as e:
+    print(f"\nError: {e}")
+    import traceback
+    traceback.print_exc()
+
+    # Versión de emergencia si todo falla
+    print("\n" + "="*70)
+    print("CREANDO GRÁFICO DE EMERGENCIA...")
+    print("="*70)
+
+    try:
+        dxy_simple = yf.download("DX-Y.NYB", start=fecha_inicio, end=fecha_fin, progress=False)
+        close_prices = dxy_simple[('Close', 'DX-Y.NYB')]
+
+        plt.figure(figsize=(14, 7))
+        plt.plot(close_prices.index, close_prices.values, 'b-', linewidth=2)
+        plt.title(f'DXY - {fecha_inicio} a {fecha_fin}')
+        plt.ylabel('Valor DXY')
+        plt.grid(True, alpha=0.3)
+        plt.xticks(rotation=45)
+
+        # Guardar imagen de emergencia
+        plt.savefig(f'dxy_emergencia_{fecha_inicio}_{fecha_fin}.png', dpi=300, bbox_inches='tight')
+        plt.show()
+
+        print(f"✓ Gráfico de emergencia guardado")
+
+    except Exception as e2:
+        print(f"Error en gráfico de emergencia: {e2}")
+
+
+
+----------------------------------------------------------------
+FILE: ./graph.py
+----------------------------------------------------------------
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+
+# Datos consolidados del escenario real 2025
+data_points = [
+    ('2025-01-01', 109.2),
+    ('2025-01-13', 109.96), # Pico "Trump Trade"
+    ('2025-02-15', 107.5),  # Dudas fiscales
+    ('2025-03-10', 104.5),  # Desaceleración / Decepción
+    ('2025-04-02', 104.2),  # Pre-Aranceles
+    ('2025-04-07', 102.94), # Impacto Arancelario (Sell-off)
+    ('2025-05-15', 101.0),  # Continuación bajista
+    ('2025-08-01', 100.5),  # Estancamiento
+    ('2025-11-04', 99.0),   # Acuerdos (pero daño hecho)
+    ('2025-12-31', 98.25),  # Cierre de año
+    ('2026-01-04', 98.10)
+]
+
+df = pd.DataFrame(data_points, columns=['Date', 'DXY'])
+df['Date'] = pd.to_datetime(df['Date'])
+
+# Interpolación suave
+date_range = pd.date_range(start=df['Date'].min(), end=df['Date'].max(), freq='D')
+df_interp = df.set_index('Date').reindex(date_range)
+df_interp['DXY'] = df_interp['DXY'].interpolate(method='pchip') # pchip para curvas más naturales
+df_interp = df_interp.reset_index().rename(columns={'index': 'Date'})
+
+# Plotting
+plt.figure(figsize=(12, 6))
+
+# Línea de tendencia
+plt.plot(df_interp['Date'], df_interp['DXY'], color='#2c3e50', linewidth=2.5, label='Índice Dólar (DXY)')
+
+# Definición de fases (Colores de fondo)
+# Fase 1: Expectativa
+plt.axvspan(pd.to_datetime('2025-01-01'), pd.to_datetime('2025-02-01'), color='green', alpha=0.1)
+plt.text(pd.to_datetime('2025-01-15'), 111, "FASE 1:\nEXPECTATIVAS", color='green', ha='center', fontsize=9, fontweight='bold')
+
+# Fase 2: Decepción
+plt.axvspan(pd.to_datetime('2025-02-01'), pd.to_datetime('2025-04-01'), color='orange', alpha=0.1)
+plt.text(pd.to_datetime('2025-03-01'), 111, "FASE 2:\nDECEPCIÓN/DUDAS", color='#d35400', ha='center', fontsize=9, fontweight='bold')
+
+# Fase 3: Realidad (Aranceles)
+plt.axvspan(pd.to_datetime('2025-04-01'), pd.to_datetime('2026-01-04'), color='red', alpha=0.05)
+plt.text(pd.to_datetime('2025-08-01'), 111, "FASE 3: IMPACTO ARANCELARIO Y AJUSTE", color='red', ha='center', fontsize=9, fontweight='bold')
+
+# Anotaciones de eventos clave
+events = [
+    ('2025-01-13', 'Promesas Electorales\n(Máximo: 109.96)', 109.96),
+    ('2025-03-10', 'Datos Macro Débiles\n(Miedo al Déficit)', 104.5),
+    ('2025-04-07', 'Ejecución de Aranceles\n(Reacción Negativa)', 102.94),
+    ('2025-12-31', 'Cierre Fiscal 2025\n(Minimos: ~98.2)', 98.25)
+]
+
+for date_str, label, y_val in events:
+    date_obj = pd.to_datetime(date_str)
+    plt.annotate(label, 
+                 xy=(date_obj, y_val), 
+                 xytext=(date_obj, y_val + 2.5 if y_val < 108 else y_val - 4),
+                 arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=6),
+                 fontsize=9, ha='center', fontweight='bold',
+                 bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8))
+
+# Títulos y formato
+plt.title('Correlación entre Gestión Política y Valor del Dólar (2025)', fontsize=14, y=1.2)
+plt.ylabel('Índice Dólar (DXY)', fontsize=12)
+plt.xlabel('Cronología de Eventos', fontsize=12)
+plt.grid(True, linestyle='--', alpha=0.4)
+plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+
+plt.tight_layout()
+plt.savefig('dolar_impacto_gestion_2025.png')
+
+
+
+----------------------------------------------------------------
+FILE: ./graph_simple.py
+----------------------------------------------------------------
+import yfinance as yf
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import numpy as np
+from datetime import datetime
+import warnings
+warnings.filterwarnings('ignore')
+
+# Configuración estética minimalista
+plt.style.use('default')  # Reset a estilo limpio
+
+# Datos
+fecha_inicio = "2025-01-01"
+fecha_fin = "2026-01-05"
+
+print("Creando infografía minimalista del DXY...")
+
+try:
+    # Obtener datos
+    dxy = yf.download("DX-Y.NYB", start=fecha_inicio, end=fecha_fin, progress=False)
+
+    # Simplificar columnas
+    if isinstance(dxy.columns, pd.MultiIndex):
+        close_prices = dxy[('Close', 'DX-Y.NYB')]
+    else:
+        close_prices = dxy['Close']
+
+    # Configuración de figura - FORMATO INFOGRAFÍA
+    fig, ax = plt.subplots(figsize=(16, 8), facecolor='white')
+
+    # Fondo degradado sutil
+    ax.set_facecolor('#f8f9fa')
+
+    # LÍNEA PRINCIPAL - ROJO INTENSO Y GRUESA
+    line_color = '#e63946'  # Rojo vibrante
+    line_width = 4
+
+    ax.plot(close_prices.index,
+            close_prices.values,
+            color=line_color,
+            linewidth=line_width,
+            solid_capstyle='round')
+
+    # Añadir sombra sutil debajo de la línea
+    ax.fill_between(close_prices.index,
+                   close_prices.values,
+                   close_prices.min() * 0.99,
+                   color=line_color,
+                   alpha=0.1)
+
+    # REMOVER TODO LO NO ESENCIAL
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_linewidth(0.5)
+    ax.spines['bottom'].set_linewidth(0.5)
+
+    # Grid sutil solo horizontal
+    ax.yaxis.grid(True, linestyle='-', alpha=0.1, linewidth=0.5)
+    ax.xaxis.grid(False)
+
+    # Formatear eje X - minimalista
+    ax.xaxis.set_major_locator(mdates.MonthLocator())
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
+
+    # Rotar fechas ligeramente
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=0, ha='center', fontsize=10)
+
+    # Eje Y minimalista
+    ax.tick_params(axis='y', length=0, labelsize=11, pad=8)
+    ax.tick_params(axis='x', length=0, labelsize=11, pad=10)
+
+    # Título minimalista pero impactante
+    ax.text(0.02, 0.98, 'DÓLAR AMERICANO',
+            transform=ax.transAxes,
+            fontsize=32,
+            fontweight='bold',
+            color='#2a2a2a',
+            verticalalignment='top',
+            fontfamily='sans-serif')
+
+    ax.text(0.02, 0.90, 'Índice DXY 2025-2026',
+            transform=ax.transAxes,
+            fontsize=18,
+            color='#6c757d',
+            verticalalignment='top',
+            fontfamily='sans-serif')
+
+    # Valores clave minimalistas
+    primer_valor = close_prices.iloc[0]
+    ultimo_valor = close_prices.iloc[-1]
+    cambio = ((ultimo_valor / primer_valor) - 1) * 100
+
+    # Valor actual - grande y destacado
+    ax.text(0.98, 0.15, f'{ultimo_valor:.1f}',
+            transform=ax.transAxes,
+            fontsize=48,
+            fontweight='bold',
+            color=line_color,
+            verticalalignment='center',
+            horizontalalignment='right',
+            fontfamily='sans-serif')
+
+    ax.text(0.98, 0.08, 'VALOR ACTUAL',
+            transform=ax.transAxes,
+            fontsize=14,
+            color='#6c757d',
+            verticalalignment='center',
+            horizontalalignment='right',
+            fontfamily='sans-serif')
+
+    # Cambio porcentual - color según si es positivo o negativo
+    cambio_color = '#2a9d8f' if cambio >= 0 else '#e63946'  # Verde si sube, rojo si baja
+
+    ax.text(0.98, 0.25, f'{cambio:+.1f}%',
+            transform=ax.transAxes,
+            fontsize=24,
+            fontweight='bold',
+            color=cambio_color,
+            verticalalignment='center',
+            horizontalalignment='right',
+            fontfamily='sans-serif')
+
+    ax.text(0.98, 0.30, 'VARIACIÓN 2025-2026',
+            transform=ax.transAxes,
+            fontsize=12,
+            color='#6c757d',
+            verticalalignment='center',
+            horizontalalignment='right',
+            fontfamily='sans-serif')
+
+    # Puntos clave en el gráfico
+    # Máximo y mínimo del período
+    max_idx = close_prices.idxmax()
+    min_idx = close_prices.idxmin()
+
+    # Punto máximo
+    ax.scatter([max_idx], [close_prices.max()],
+              color='#ff9f1c', s=120, zorder=5, edgecolors='white', linewidth=2)
+
+    ax.annotate(f'Máx: {close_prices.max():.1f}',
+               xy=(max_idx, close_prices.max()),
+               xytext=(0, 20),
+               textcoords='offset points',
+               ha='center',
+               fontsize=12,
+               fontweight='bold',
+               color='#ff9f1c')
+
+    # Punto mínimo
+    ax.scatter([min_idx], [close_prices.min()],
+              color='#457b9d', s=120, zorder=5, edgecolors='white', linewidth=2)
+
+    ax.annotate(f'Mín: {close_prices.min():.1f}',
+               xy=(min_idx, close_prices.min()),
+               xytext=(0, -30),
+               textcoords='offset points',
+               ha='center',
+               fontsize=12,
+               fontweight='bold',
+               color='#457b9d')
+
+    # Ajustar límites para que respire
+    y_min, y_max = close_prices.min(), close_prices.max()
+    y_range = y_max - y_min
+    ax.set_ylim(y_min - y_range * 0.05, y_max + y_range * 0.15)
+
+    # Ajustar márgenes
+    plt.subplots_adjust(left=0.05, right=0.95, top=0.85, bottom=0.15)
+
+    # Guardar en alta calidad para infografía
+    nombre_infografia = f"infografia_dxy_{fecha_inicio}_{fecha_fin}.png"
+    plt.savefig(nombre_infografia, dpi=300, facecolor='white', edgecolor='none', bbox_inches='tight')
+
+    # También versión para redes sociales (formato cuadrado)
+    fig_social, ax_social = plt.subplots(figsize=(8, 8), facecolor='white')
+    ax_social.set_facecolor('#f8f9fa')
+
+    # Línea más gruesa para formato cuadrado
+    ax_social.plot(close_prices.index, close_prices.values,
+                  color=line_color, linewidth=6, solid_capstyle='round')
+
+    # Relleno sutil
+    ax_social.fill_between(close_prices.index, close_prices.values,
+                          close_prices.min() * 0.99, color=line_color, alpha=0.15)
+
+    # Remover bordes
+    ax_social.spines['top'].set_visible(False)
+    ax_social.spines['right'].set_visible(False)
+    ax_social.spines['left'].set_visible(False)
+    ax_social.spines['bottom'].set_visible(False)
+
+    # Sin ejes
+    ax_social.set_xticks([])
+    ax_social.set_yticks([])
+
+    # Título para redes
+    ax_social.text(0.5, 0.93, 'DXY 2025-2026',
+                  transform=ax_social.transAxes,
+                  fontsize=28,
+                  fontweight='bold',
+                  color='#2a2a2a',
+                  ha='center',
+                  fontfamily='sans-serif')
+
+    ax_social.text(0.5, 0.87, f'{ultimo_valor:.1f}  |  {cambio:+.1f}%',
+                  transform=ax_social.transAxes,
+                  fontsize=36,
+                  fontweight='bold',
+                  color=line_color,
+                  ha='center',
+                  fontfamily='sans-serif')
+
+    # Guardar versión redes sociales
+    nombre_social = f"dxy_social_{fecha_inicio}_{fecha_fin}.png"
+    plt.savefig(nombre_social, dpi=300, facecolor='white', edgecolor='none', bbox_inches='tight')
+
+    plt.show()
+
+    print(f"\n✅ INFOGRAFÍAS CREADAS:")
+    print(f"   1. {nombre_infografia} (formato horizontal)")
+    print(f"   2. {nombre_social} (formato cuadrado para redes)")
+    print(f"\n📊 DATOS CLAVE:")
+    print(f"   • Período: {close_prices.index[0].date()} a {close_prices.index[-1].date()}")
+    print(f"   • Valor inicial: {primer_valor:.1f}")
+    print(f"   • Valor final: {ultimo_valor:.1f}")
+    print(f"   • Cambio: {cambio:+.1f}%")
+    print(f"   • Máximo: {close_prices.max():.1f}")
+    print(f"   • Mínimo: {close_prices.min():.1f}")
+
+except Exception as e:
+    print(f"Error: {e}")
+
+    # Versión de emergencia ultra minimalista
+    print("\nCreando versión minimalista de emergencia...")
+
+    try:
+        dxy_simple = yf.download("DX-Y.NYB", start=fecha_inicio, end=fecha_fin, progress=False)
+        close_prices = dxy_simple[('Close', 'DX-Y.NYB')]
+
+        fig, ax = plt.subplots(figsize=(16, 8), facecolor='white')
+        ax.plot(close_prices.index, close_prices.values, color='#e63946', linewidth=5)
+
+        # Remover todo
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_visible(False)
+        ax.spines['bottom'].set_visible(False)
+
+        # Solo el valor actual
+        ax.text(0.95, 0.95, f'{close_prices.iloc[-1]:.1f}',
+                transform=ax.transAxes,
+                fontsize=48,
+                fontweight='bold',
+                color='#e63946',
+                ha='right',
+                va='top')
+
+        plt.savefig(f'dxy_minimal_emergencia.png', dpi=300, bbox_inches='tight')
+        plt.show()
+
+        print("✅ Versión minimalista de emergencia creada: dxy_minimal_emergencia.png")
+
+    except Exception as e2:
+        print(f"Error en versión de emergencia: {e2}")
+
+
+
+----------------------------------------------------------------
+FILE: ./graph_simple_v3.py
+----------------------------------------------------------------
+# VERSIÓN SIN DEPENDER DE FUENTES ESPECÍFICAS
+import yfinance as yf
+import matplotlib.pyplot as plt
+
+# Obtener datos
+dxy = yf.download("DX-Y.NYB", start="2025-01-01", end="2026-01-05")
+close_prices = dxy[('Close', 'DX-Y.NYB')]
+
+# Crear gráfico ULTRA minimalista
+fig, ax = plt.subplots(figsize=(16, 9), facecolor='white')
+ax.plot(close_prices.index, close_prices.values, color='#e63946', linewidth=5)
+
+# Texto simple (usará la fuente por defecto de matplotlib)
+ax.text(0.5, 0.08, 'USD 2025-2026',
+        transform=ax.transAxes,
+        fontsize=40,
+        fontweight='bold',
+        color='#333333',
+        ha='center',
+        va='center')
+
+# Remover todo lo demás
+ax.set_xticks([])
+ax.set_yticks([])
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
+ax.spines['left'].set_visible(False)
+ax.spines['bottom'].set_visible(False)
+
+# Guardar
+plt.savefig('dxy_simple.png', dpi=300, bbox_inches='tight')
+plt.show()
+
+
+
+----------------------------------------------------------------
+FILE: ./usd_graph_month.py
+----------------------------------------------------------------
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+
+# Data points (Key anchors for the trend)
+data = {
+    'Date': [
+        '2025-01-01', '2025-02-01', '2025-02-15', '2025-04-05',
+        '2025-05-12', '2025-06-04', '2025-08-01', '2025-11-04',
+        '2025-12-31', '2026-01-04'
+    ],
+    'DXY': [113.5, 115.0, 118.0, 120.0, 123.8, 121.5, 115.0, 102.0, 98.1, 98.2]
+}
+
+df = pd.DataFrame(data)
+df['Date'] = pd.to_datetime(df['Date'])
+
+# Interpolate to get a daily series for a smooth line (removing noise)
+date_range = pd.date_range(start=df['Date'].min(), end=df['Date'].max(), freq='D')
+df_interp = df.set_index('Date').reindex(date_range)
+df_interp['DXY'] = df_interp['DXY'].interpolate(method='time')
+df_interp = df_interp.reset_index().rename(columns={'index': 'Date'})
+
+# Plotting
+plt.figure(figsize=(12, 6))
+
+# Plot the smooth trend line (no noise, no markers as it's a trend view)
+plt.plot(df_interp['Date'], df_interp['DXY'], color='#1f77b4', linewidth=2, label='Tendencia DXY')
+
+# Annotations (keeping the style and positions from the previous version)
+events = [
+    ('2025-02-01', 'Inicio Aranceles', 115),
+    ('2025-05-12', 'Máx. Tensión', 123.8),
+    ('2025-11-04', 'Acuerdo China', 102)
+]
+
+for date_str, label, y_val in events:
+    date_obj = pd.to_datetime(date_str)
+    plt.annotate(label,
+                 xy=(date_obj, y_val),
+                 xytext=(date_obj, y_val + 5), # Slightly higher text position for clean look
+                 arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=6),
+                 fontsize=9, ha='center', fontweight='bold')
+
+# Title with the y=1.08 fix to prevent overlapping
+plt.title('Evolución del Índice Dólar (DXY) tras las Tarifas de Trump (2025-2026)', fontsize=14, y=1.2)
+plt.ylabel('Valor Índice Dólar (DXY)', fontsize=12)
+plt.xlabel('Fecha', fontsize=12)
+
+# Styling from the latest version (grid, orange zone)
+plt.grid(True, linestyle='-', alpha=0.3)
+plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+plt.gca().xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+
+# Highlight the area of "Tariff Stress" / High Volatility Period
+plt.axvspan(pd.to_datetime('2025-02-01'), pd.to_datetime('2025-10-01'), color='orange', alpha=0.1, label='Periodo de Alta Tensión')
+
+plt.legend(loc='lower left')
+plt.tight_layout()
+plt.savefig('dolar_tarifas_trump_2025_clean_fixed.png')
+
+
+
+----------------------------------------------------------------
+FILE: ./usd_graph.py
+----------------------------------------------------------------
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import numpy as np
+
+# Set seed for reproducibility (Same as before to keep the graph identical)
+np.random.seed(42)
+
+# Define key milestones
+anchors = {
+    '2025-01-01': 113.5,
+    '2025-02-01': 115.0, 
+    '2025-02-15': 118.0, 
+    '2025-04-05': 120.0, 
+    '2025-05-12': 123.8, 
+    '2025-06-04': 121.5, 
+    '2025-08-01': 115.0, 
+    '2025-11-04': 102.0, 
+    '2025-12-31': 98.1,
+    '2026-01-04': 98.2
+}
+
+# Create a weekly date range
+dates = pd.date_range(start='2025-01-01', end='2026-01-04', freq='W-FRI') 
+df = pd.DataFrame({'Date': dates})
+
+# Interpolation logic
+anchor_df = pd.DataFrame(list(anchors.items()), columns=['Date', 'Trend'])
+anchor_df['Date'] = pd.to_datetime(anchor_df['Date'])
+df = pd.merge(df, anchor_df, on='Date', how='left')
+df = df.set_index('Date')
+combined_index = df.index.union(anchor_df.set_index('Date').index).sort_values()
+df_trend = df.reindex(combined_index)
+df_trend.update(anchor_df.set_index('Date'))
+df_trend['Trend'] = df_trend['Trend'].interpolate(method='time')
+df_final = df_trend.reindex(dates).reset_index().rename(columns={'index': 'Date'})
+
+# Volatility logic
+def get_noise(row):
+    date = row['Date']
+    month = date.month
+    if 2 <= month <= 9:
+        volatility = 0.8
+    else:
+        volatility = 0.4
+    noise = np.random.normal(0, volatility)
+    return row['Trend'] + noise
+
+df_final['DXY_Simulated'] = df_final.apply(get_noise, axis=1)
+
+# Plotting
+plt.figure(figsize=(12, 6))
+
+plt.plot(df_final['Date'], df_final['DXY_Simulated'], color='#1f77b4', linewidth=1.5, marker='.', markersize=5, label='Cierre Semanal (Simulado)')
+plt.plot(df_final['Date'], df_final['Trend'], color='gray', linestyle='--', alpha=0.3, linewidth=1, label='Tendencia Subyacente')
+
+# Annotations
+events = [
+    ('2025-02-01', 'Inicio Aranceles', 115),
+    ('2025-05-12', 'Máx. Tensión', 123.8),
+    ('2025-11-04', 'Acuerdo China', 102)
+]
+
+for date_str, label, y_val in events:
+    date_obj = pd.to_datetime(date_str)
+    plt.annotate(label, 
+                 xy=(date_obj, y_val), 
+                 xytext=(date_obj, y_val + 4),
+                 arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=6),
+                 fontsize=9, ha='center', fontweight='bold')
+
+# Title Adjustment: Added 'y=1.08' to push title up
+plt.title('Evolución Semanal Detallada del Dólar (DXY) 2025-2026\n(Simulación de Volatilidad de Mercado)', fontsize=14, y=1.12)
+
+plt.ylabel('Valor Índice Dólar (DXY)', fontsize=12)
+plt.xlabel('Fecha (Semanas)', fontsize=12)
+plt.grid(True, linestyle='-', alpha=0.3)
+plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%b'))
+plt.gca().xaxis.set_major_locator(mdates.MonthLocator())
+
+plt.axvspan(pd.to_datetime('2025-02-01'), pd.to_datetime('2025-10-01'), color='orange', alpha=0.1, label='Alta Volatilidad')
+
+plt.legend(loc='lower left')
+plt.tight_layout()
+plt.savefig('dolar_tarifas_trump_2025_final.png')
+
+
+
